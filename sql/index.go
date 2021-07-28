@@ -45,10 +45,11 @@ func NewIndexHelper(inputFile string) *IndexHelperBean {
 	}
 }
 
-func (this *IndexHelperBean) InputLine(line string) error {
+func (this *IndexHelperBean) InputLine(linesource string) (string, error) {
+	line := strings.TrimSpace(linesource)
 	if strings.Index(line, "CREATE TABLE") == 0 {
 		if this.currentCreateTable != nil && this.currentCreateTable.END == "" {
-			return fmt.Errorf("%s has not closed", this.currentCreateTable.START)
+			return "", fmt.Errorf("%s has not closed", this.currentCreateTable.START)
 		}
 		this.currentCreateTable = &CreateTableBean{
 			START:      line,
@@ -75,15 +76,24 @@ func (this *IndexHelperBean) InputLine(line string) error {
 			FIELD: strings.TrimSpace(GetSection(line, "(", ")")),
 		})
 	}
+	if strings.Index(line, "AUTO_INCREMENT=") > 0 {
+		s := GetSection(linesource, "AUTO_INCREMENT=", " ")
+		if s == "" {
+			s = GetSection(linesource, "AUTO_INCREMENT=", ";")
+		}
+		linesource = strings.ReplaceAll(linesource, "AUTO_INCREMENT="+s, "")
+	} else if strings.Index(line, "AUTO_INCREMENT") > 0 {
+		linesource = strings.ReplaceAll(linesource, "AUTO_INCREMENT", "")
+	}
 	if strings.Index(line, ")") == 0 {
 		if this.currentCreateTable != nil && this.currentCreateTable.END != "" {
-			return fmt.Errorf("%s closed double time", this.currentCreateTable.START)
+			return "", fmt.Errorf("%s closed double time", this.currentCreateTable.START)
 		}
 		this.currentCreateTable.END = line
 		this.CreateTalbeList = append(this.CreateTalbeList, *this.currentCreateTable)
 		this.currentCreateTable = nil
 	}
-	return nil
+	return linesource, nil
 }
 
 func (this *CreateTableBean) MakeDropSQL() string {
@@ -129,7 +139,6 @@ func (this *CreateTableBean) MakeAddSQL() string {
 }
 
 func GetSection(s string, left, right string) string {
-
 	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
 		if err := recover(); err != nil {
 			fmt.Println("ERROR:")
@@ -139,7 +148,6 @@ func GetSection(s string, left, right string) string {
 			panic(err) // 这里的err其实就是panic传入的内容，55
 		}
 	}()
-
 	li := strings.Index(s, left)
 	if li < 0 {
 		return ""
@@ -155,7 +163,40 @@ func GetSection(s string, left, right string) string {
 	)
 }
 
+func GetSectionOutter(s string, left, right string) string {
+	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
+		if err := recover(); err != nil {
+			fmt.Println("ERROR:")
+			fmt.Println("    ", strings.TrimSpace(s))
+			fmt.Println("    ", left)
+			fmt.Println("    ", right)
+			panic(err) // 这里的err其实就是panic传入的内容，55
+		}
+	}()
+	li := strings.Index(s, left)
+	if li < 0 {
+		return ""
+	}
+	ss := string([]byte(s)[li+len([]byte(left)):])
+	ri := strings.LastIndex(ss, right)
+	if ri < 0 {
+		return ""
+	}
+	ri += li + len([]byte(left))
+	return string(
+		[]byte(s)[li+len([]byte(left)) : ri],
+	)
+}
+
 func GetLeft(s string, right string) string {
+	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
+		if err := recover(); err != nil {
+			fmt.Println("ERROR:")
+			fmt.Println("    ", strings.TrimSpace(s))
+			fmt.Println("    ", right)
+			panic(err) // 这里的err其实就是panic传入的内容，55
+		}
+	}()
 	ri := strings.Index(s, right)
 	if ri < 0 {
 		return ""
@@ -164,6 +205,14 @@ func GetLeft(s string, right string) string {
 }
 
 func GetRight(s string, left string) string {
+	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
+		if err := recover(); err != nil {
+			fmt.Println("ERROR:")
+			fmt.Println("    ", strings.TrimSpace(s))
+			fmt.Println("    ", left)
+			panic(err) // 这里的err其实就是panic传入的内容，55
+		}
+	}()
 	li := strings.Index(s, left)
 	if li < 0 {
 		return ""

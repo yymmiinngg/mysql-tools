@@ -45,7 +45,7 @@ func (this *InsertHelperBean) InputLine(line string) bool {
 		}
 		this.mergeInsertMap[tableName] = mergeInsertBean
 	}
-	mergeInsertBean.VALUES = append(mergeInsertBean.VALUES, strings.TrimSpace(GetSection(line, "VALUES (", ")")))
+	mergeInsertBean.VALUES = append(mergeInsertBean.VALUES, strings.TrimSpace(GetSectionOutter(line, "VALUES (", ")")))
 	mergeInsertBean.count++
 
 	return true
