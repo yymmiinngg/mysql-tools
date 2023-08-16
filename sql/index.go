@@ -19,11 +19,18 @@ type CreateTableBean struct {
 	PRIMARY_KEY *PrimaryKeyBean
 	KEY         []KeyBean
 	UNIQUE_KEY  []UniqueKeyBean
+	FOREIGN_KEY []ForeignKeyBean
 }
 
 type PrimaryKeyBean struct {
 	LINE  string // PRIMARY KEY (`openid`),
 	FIELD string // `openid`
+}
+
+type KeyBean struct {
+	LINE  string // KEY `key_name` (`field`)
+	NAME  string // `key_name`
+	FIELD string // `field`
 }
 
 type UniqueKeyBean struct {
@@ -32,10 +39,12 @@ type UniqueKeyBean struct {
 	FIELD string // `field1`, `field2`, ...
 }
 
-type KeyBean struct {
-	LINE  string // KEY `key_name` (`field`)
-	NAME  string // `key_name`
-	FIELD string // `field`
+type ForeignKeyBean struct {
+	LINE        string // CONSTRAINT `foreign_key_instance_id` FOREIGN KEY (`process_instance_id`) REFERENCES `t_ds_process_instance` (`id`) ON DELETE CASCADE
+	NAME        string // `foreign_key_instance_id`
+	FOREIGN_KEY string // `process_instance_id`
+	REFERENCES  string // `t_ds_process_instance` (`id`)
+	ON          string // ON DELETE CASCADE
 }
 
 func NewIndexHelper(inputFile string) *IndexHelperBean {
@@ -45,107 +54,165 @@ func NewIndexHelper(inputFile string) *IndexHelperBean {
 	}
 }
 
-func (this *IndexHelperBean) InputLine(linesource string) (string, error) {
+func (it *IndexHelperBean) InputLine(linesource string) (string, error) {
 	line := strings.TrimSpace(linesource)
+	// CREATE TABLE `name` (
 	if strings.Index(line, "CREATE TABLE") == 0 {
-		if this.currentCreateTable != nil && this.currentCreateTable.END == "" {
-			return "", fmt.Errorf("%s has not closed", this.currentCreateTable.START)
+		if it.currentCreateTable != nil && it.currentCreateTable.END == "" {
+			return "", fmt.Errorf("%s has not closed", it.currentCreateTable.START)
 		}
-		this.currentCreateTable = &CreateTableBean{
+		it.currentCreateTable = &CreateTableBean{
 			START:      line,
 			TABLE_NAME: strings.TrimSpace(GetSection(line, "CREATE TABLE", "(")),
 		}
 	}
+	// PRIMARY KEY (`id`),
 	if strings.Index(line, "PRIMARY KEY") == 0 {
-		this.currentCreateTable.PRIMARY_KEY = &PrimaryKeyBean{
+		it.currentCreateTable.PRIMARY_KEY = &PrimaryKeyBean{
 			LINE:  line,
 			FIELD: strings.TrimSpace(GetSection(line, "(", ")")),
 		}
 	}
+	// KEY `process_instance_id` (`process_instance_id`) USING BTREE,
 	if strings.Index(line, "KEY") == 0 {
-		this.currentCreateTable.KEY = append(this.currentCreateTable.KEY, KeyBean{
+		it.currentCreateTable.KEY = append(it.currentCreateTable.KEY, KeyBean{
 			LINE:  line,
 			NAME:  strings.TrimSpace(GetSection(line, "KEY", "(")),
 			FIELD: strings.TrimSpace(GetSection(line, "(", ")")),
 		})
 	}
+	// UNIQUE KEY `process_instance_id` (`process_instance_id`) USING BTREE,
 	if strings.Index(line, "UNIQUE KEY") == 0 {
-		this.currentCreateTable.UNIQUE_KEY = append(this.currentCreateTable.UNIQUE_KEY, UniqueKeyBean{
+		it.currentCreateTable.UNIQUE_KEY = append(it.currentCreateTable.UNIQUE_KEY, UniqueKeyBean{
 			LINE:  line,
 			NAME:  strings.TrimSpace(GetSection(line, "UNIQUE KEY", "(")),
 			FIELD: strings.TrimSpace(GetSection(line, "(", ")")),
 		})
 	}
-	if strings.Index(line, "AUTO_INCREMENT=") > 0 {
-		s := GetSection(linesource, "AUTO_INCREMENT=", " ")
-		if s == "" {
-			s = GetSection(linesource, "AUTO_INCREMENT=", ";")
-		}
-		linesource = strings.ReplaceAll(linesource, "AUTO_INCREMENT="+s, "")
-	} else if strings.Index(line, "AUTO_INCREMENT") > 0 {
-		linesource = strings.ReplaceAll(linesource, "AUTO_INCREMENT", "")
+	// CONSTRAINT `foreign_key_instance_id` FOREIGN KEY (`process_instance_id`) REFERENCES `t_ds_process_instance` (`id`) ON DELETE CASCADE
+	if strings.Index(line, "CONSTRAINT") == 0 {
+		it.currentCreateTable.FOREIGN_KEY = append(it.currentCreateTable.FOREIGN_KEY, ForeignKeyBean{
+			LINE:        line,
+			NAME:        strings.TrimSpace(GetSection(line, "CONSTRAINT ", " ")),
+			FOREIGN_KEY: strings.TrimSpace(GetSection(line, "FOREIGN KEY (", ")")),
+			REFERENCES:  strings.TrimSpace(GetSection(line, "REFERENCES ", ")") + ")"),
+			ON:          strings.TrimSpace(GetRight(line, "ON ")),
+		})
 	}
+	// )
 	if strings.Index(line, ")") == 0 {
-		if this.currentCreateTable != nil && this.currentCreateTable.END != "" {
-			return "", fmt.Errorf("%s closed double time", this.currentCreateTable.START)
+		if it.currentCreateTable != nil && it.currentCreateTable.END != "" {
+			return "", fmt.Errorf("%s closed double time", it.currentCreateTable.START)
 		}
-		this.currentCreateTable.END = line
-		this.CreateTalbeList = append(this.CreateTalbeList, *this.currentCreateTable)
-		this.currentCreateTable = nil
+		it.currentCreateTable.END = line
+		it.CreateTalbeList = append(it.CreateTalbeList, *it.currentCreateTable)
+		it.currentCreateTable = nil
+	}
+	// 清除自增约束
+	if strings.Index(line, "AUTO_INCREMENT=") > 0 {
+		linesource = func() string {
+			s := GetSection(linesource, "AUTO_INCREMENT=", " ") // ENGINE=InnoDB AUTO_INCREMENT=1489841 DEFAULT CHARSET=utf8
+			if s != "" {
+				return strings.ReplaceAll(linesource, "AUTO_INCREMENT="+s+" ", "")
+			}
+			s = GetSection(linesource, "AUTO_INCREMENT=", ";") // ENGINE=InnoDB AUTO_INCREMENT=1489841;
+			if s != "" {
+				return strings.ReplaceAll(linesource, " AUTO_INCREMENT="+s+";", "")
+			}
+			s = GetRight(linesource, "AUTO_INCREMENT=") // ENGINE=InnoDB AUTO_INCREMENT=1489841
+			if s != "" {
+				return strings.ReplaceAll(linesource, " AUTO_INCREMENT="+s, "")
+			}
+			return linesource
+		}()
+	} else if strings.Index(line, " AUTO_INCREMENT") > 0 {
+		linesource = strings.ReplaceAll(linesource, " AUTO_INCREMENT", "")
+	} else if strings.Index(line, "AUTO_INCREMENT ") > 0 {
+		linesource = strings.ReplaceAll(linesource, "AUTO_INCREMENT ", "")
 	}
 	return linesource, nil
 }
 
-func (this *CreateTableBean) MakeDropSQL() string {
+func (it *CreateTableBean) MakeDropIndexSQL() string {
 	var buffer bytes.Buffer
 	buffer.WriteString("\n")
 	buffer.WriteString("--\n")
-	buffer.WriteString("-- Drop Table: " + this.TABLE_NAME + "\n")
+	buffer.WriteString("-- Drop KEY: " + it.TABLE_NAME + "\n")
 	buffer.WriteString("--\n")
-	if this.PRIMARY_KEY != nil {
-		dropPrimaryKey := fmt.Sprintf("ALTER TABLE %s DROP PRIMARY KEY;", this.TABLE_NAME)
+	if it.PRIMARY_KEY != nil {
+		dropPrimaryKey := fmt.Sprintf("ALTER TABLE %s DROP PRIMARY KEY;", it.TABLE_NAME)
 		buffer.WriteString(dropPrimaryKey + "\n")
 	}
-	for _, key := range this.KEY {
-		dropKey := fmt.Sprintf("ALTER TABLE %s DROP INDEX %s;", this.TABLE_NAME, key.NAME)
+	for _, key := range it.KEY {
+		dropKey := fmt.Sprintf("ALTER TABLE %s DROP INDEX %s;", it.TABLE_NAME, key.NAME)
 		buffer.WriteString(dropKey + "\n")
 	}
-	for _, key := range this.UNIQUE_KEY {
-		dropKey := fmt.Sprintf("ALTER TABLE %s DROP INDEX %s;", this.TABLE_NAME, key.NAME)
+	for _, key := range it.UNIQUE_KEY {
+		dropKey := fmt.Sprintf("ALTER TABLE %s DROP INDEX %s;", it.TABLE_NAME, key.NAME)
 		buffer.WriteString(dropKey + "\n")
 	}
 	return buffer.String()
 }
 
-func (this *CreateTableBean) MakeAddSQL() string {
+func (it *CreateTableBean) MakeDropForeignKeySQL() string {
 	var buffer bytes.Buffer
 	buffer.WriteString("\n")
 	buffer.WriteString("--\n")
-	buffer.WriteString("-- Create Table: " + this.TABLE_NAME + "\n")
+	buffer.WriteString("-- Drop FOREIGN KEY: " + it.TABLE_NAME + "\n")
 	buffer.WriteString("--\n")
-	if this.PRIMARY_KEY != nil {
-		addPrimaryKey := fmt.Sprintf("ALTER TABLE %s ADD PRIMARY KEY (%s);", this.TABLE_NAME, strings.Trim(this.PRIMARY_KEY.FIELD, ","))
+	for _, key := range it.FOREIGN_KEY {
+		dropKey := fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s;", it.TABLE_NAME, key.NAME)
+		buffer.WriteString(dropKey + "\n")
+	}
+	return buffer.String()
+}
+
+func (it *CreateTableBean) MakeAddIndexSQL() string {
+	var buffer bytes.Buffer
+	buffer.WriteString("\n")
+	buffer.WriteString("--\n")
+	buffer.WriteString("-- Add KEY: " + it.TABLE_NAME + "\n")
+	buffer.WriteString("--\n")
+	if it.PRIMARY_KEY != nil {
+		addPrimaryKey := fmt.Sprintf("ALTER TABLE %s ADD PRIMARY KEY (%s);", it.TABLE_NAME, strings.Trim(it.PRIMARY_KEY.FIELD, ","))
 		buffer.WriteString(addPrimaryKey + "\n")
 	}
-	for _, key := range this.KEY {
-		addKey := fmt.Sprintf("ALTER TABLE %s ADD INDEX %s (%s);", this.TABLE_NAME, key.NAME, strings.Trim(key.FIELD, ","))
+	for _, key := range it.KEY {
+		addKey := fmt.Sprintf("ALTER TABLE %s ADD INDEX %s (%s);", it.TABLE_NAME, key.NAME, strings.Trim(key.FIELD, ","))
 		buffer.WriteString(addKey + "\n")
 	}
-	for _, key := range this.UNIQUE_KEY {
-		addKey := fmt.Sprintf("ALTER TABLE %s ADD UNIQUE INDEX %s (%s);", this.TABLE_NAME, key.NAME, strings.Trim(key.FIELD, ","))
+	for _, key := range it.UNIQUE_KEY {
+		addKey := fmt.Sprintf("ALTER TABLE %s ADD UNIQUE INDEX %s (%s);", it.TABLE_NAME, key.NAME, strings.Trim(key.FIELD, ","))
+		buffer.WriteString(addKey + "\n")
+	}
+	return buffer.String()
+}
+
+func (it *CreateTableBean) MakeAddForeignKeySQL() string {
+	var buffer bytes.Buffer
+	buffer.WriteString("\n")
+	buffer.WriteString("--\n")
+	buffer.WriteString("-- Add FOREIGN KEY: " + it.TABLE_NAME + "\n")
+	buffer.WriteString("--\n")
+	for _, key := range it.FOREIGN_KEY {
+		on := ""
+		if key.ON != "" {
+			on = " ON " + key.ON
+		}
+		addKey := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s%s;", it.TABLE_NAME, key.NAME, key.FOREIGN_KEY, key.REFERENCES, on)
 		buffer.WriteString(addKey + "\n")
 	}
 	return buffer.String()
 }
 
 func GetSection(s string, left, right string) string {
-	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
+	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println("ERROR:")
 			fmt.Println("    ", strings.TrimSpace(s))
 			fmt.Println("    ", left)
 			fmt.Println("    ", right)
-			panic(err) // 这里的err其实就是panic传入的内容，55
+			panic(err)
 		}
 	}()
 	li := strings.Index(s, left)
@@ -189,12 +256,12 @@ func GetSectionOutter(s string, left, right string) string {
 }
 
 func GetLeft(s string, right string) string {
-	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
+	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println("ERROR:")
 			fmt.Println("    ", strings.TrimSpace(s))
 			fmt.Println("    ", right)
-			panic(err) // 这里的err其实就是panic传入的内容，55
+			panic(err)
 		}
 	}()
 	ri := strings.Index(s, right)
@@ -205,12 +272,12 @@ func GetLeft(s string, right string) string {
 }
 
 func GetRight(s string, left string) string {
-	defer func() { // 必须要先声明defer，否则不能捕获到panic异常
+	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println("ERROR:")
 			fmt.Println("    ", strings.TrimSpace(s))
 			fmt.Println("    ", left)
-			panic(err) // 这里的err其实就是panic传入的内容，55
+			panic(err)
 		}
 	}()
 	li := strings.Index(s, left)

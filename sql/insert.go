@@ -11,13 +11,13 @@ type InsertHelperBean struct {
 }
 
 type MergeInsertBean struct {
-	INSERT     string   // INSERT INTO `table_name`
-	TABLE_NAME string   // `table_name`
-	VALUES     []string // `value1`, `value2`, ... , `valuen`
-	count      int
+	INSERT string   // INSERT INTO `table_name`
+	VALUES []string // `value1`, `value2`, ... , `valuen`
+	count  int
 }
 
-var MAX_VALUES_COUNT = 2
+// 批大小
+var BATCH_SIZE = 0
 
 func NewMergeInsertHelper(inputFile string) *InsertHelperBean {
 	return &InsertHelperBean{
@@ -27,69 +27,85 @@ func NewMergeInsertHelper(inputFile string) *InsertHelperBean {
 }
 
 // return: true 合并成功 | false 无需合并
-func (this *InsertHelperBean) InputLine(line string) bool {
+func (it *InsertHelperBean) InputLine(linesource string) bool {
+	line := strings.TrimSpace(linesource)
 
-	if strings.Index(line, "INSERT INTO") != 0 {
+	valueString := strings.TrimSpace(GetSectionOutter(line, "VALUES (", ")"))
+	// 没有 VALUES 的行
+	if valueString == "" {
 		return false
 	}
 
-	tableName := strings.TrimSpace(GetSection(line, "INSERT INTO ", " "))
+	insertString := strings.TrimSpace(GetLeft(line, "VALUES"))
+	tableName := ""
+	// 以 INSERGT INTO 开头
+	if strings.Index(insertString, "INSERT INTO") == 0 {
+		tableName = strings.TrimSpace(GetSection(line, "INSERT INTO ", " "))
+	} else
+	// 以 INSERGT IGNORE INTO 开头
+	if strings.Index(insertString, "INSERT IGNORE INTO") == 0 {
+		tableName = strings.TrimSpace(GetSection(line, "INSERT IGNORE INTO ", " "))
+	} else
+	// 不是 INSERT 开头
+	{
+		return false
+	}
 
-	mergeInsertBean, ok := this.mergeInsertMap[tableName]
+	// 合并
+	mergeInsertBean, ok := it.mergeInsertMap[tableName]
 	if !ok {
 		mergeInsertBean = &MergeInsertBean{
-			INSERT:     strings.TrimSpace(GetLeft(line, "VALUES")),
-			TABLE_NAME: tableName,
-			VALUES:     make([]string, 0, MAX_VALUES_COUNT),
-			count:      0,
+			INSERT: insertString,
+			VALUES: []string{valueString},
+			count:  len(valueString),
 		}
-		this.mergeInsertMap[tableName] = mergeInsertBean
+		it.mergeInsertMap[tableName] = mergeInsertBean
+	} else {
+		mergeInsertBean.VALUES = append(mergeInsertBean.VALUES, valueString)
+		mergeInsertBean.count += len(valueString)
 	}
-	mergeInsertBean.VALUES = append(mergeInsertBean.VALUES, strings.TrimSpace(GetSectionOutter(line, "VALUES (", ")")))
-	mergeInsertBean.count++
-
 	return true
 }
 
-func (this *InsertHelperBean) HasData() bool {
-	return len(this.mergeInsertMap) > 0
+func (it *InsertHelperBean) HasData() bool {
+	return len(it.mergeInsertMap) > 0
 }
 
-func (this *InsertHelperBean) MakeSQL() string {
+func (it *InsertHelperBean) MakeSQL() string {
 	var buffer bytes.Buffer
-	for _, value := range this.mergeInsertMap {
+	for _, value := range it.mergeInsertMap {
 		buffer.WriteString(value.MakeSQL())
 	}
 
 	return buffer.String()
 }
 
-func (this *InsertHelperBean) Clear() {
-	this.mergeInsertMap = make(map[string]*MergeInsertBean, 10)
+func (it *InsertHelperBean) Clear() {
+	it.mergeInsertMap = make(map[string]*MergeInsertBean, 10)
 }
 
-func (this *InsertHelperBean) TakeFullMergeInsertBean() *MergeInsertBean {
-	for key, value := range this.mergeInsertMap {
-		if value.count >= MAX_VALUES_COUNT {
-			delete(this.mergeInsertMap, key)
+func (it *InsertHelperBean) TakeFullMergeInsertBean() *MergeInsertBean {
+	for key, value := range it.mergeInsertMap {
+		if value.count >= BATCH_SIZE {
+			delete(it.mergeInsertMap, key)
 			return value
 		}
 	}
 	return nil
 }
 
-func (this *MergeInsertBean) MakeSQL() string {
+func (it *MergeInsertBean) MakeSQL() string {
 	var buffer bytes.Buffer
-	buffer.WriteString(this.INSERT)
+	buffer.WriteString(it.INSERT)
 	buffer.WriteString(" VALUES ")
 	first := true
-	for _, values := range this.VALUES {
+	for _, values := range it.VALUES {
 		if !first {
 			buffer.WriteString(",")
 		} else {
 			first = false
 		}
-		buffer.WriteString("\n    (")
+		buffer.WriteString("(")
 		buffer.WriteString(values)
 		buffer.WriteString(")")
 	}

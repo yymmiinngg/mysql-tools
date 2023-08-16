@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -24,7 +23,7 @@ func usage(flagset *flag.FlagSet) {
 func main() {
 	var CMD string
 	var InputDir, OutputDir, FileExt string
-	var ShowHelp bool
+	var ShowHelp, SetForeignKeyChecksOff bool
 	var MaxValuesCount int
 
 	argsflag := flag.NewFlagSet("mysqltools", flag.PanicOnError)
@@ -33,23 +32,26 @@ func main() {
 	argsflag.StringVar(&OutputDir, "o", "", "output dir")
 	argsflag.StringVar(&FileExt, "e", ".sql", "file ext of sql")
 	argsflag.BoolVar(&ShowHelp, "h", false, "show help")
-	argsflag.IntVar(&MaxValuesCount, "m", 100, "show help")
-	argsflag.Parse(os.Args[2:])
-
+	argsflag.IntVar(&MaxValuesCount, "b", 4096, "insert batch size")
+	argsflag.BoolVar(&SetForeignKeyChecksOff, "f", false, "set foreign key checks off")
 	if len(os.Args) < 2 {
 		usage(argsflag)
 		return
 	}
+
+	argsflag.Parse(os.Args[2:])
+
+	if ShowHelp {
+		usage(argsflag)
+		return
+	}
+
 	CMD = os.Args[1]
 	if CMD != "sql-trans" {
 		usage(argsflag)
 		return
 	}
 
-	if ShowHelp {
-		usage(argsflag)
-		return
-	}
 	if OutputDir == "" {
 		log.Panic("Please set output dir with -o")
 	}
@@ -60,7 +62,8 @@ func main() {
 	if InputDir == OutputDir {
 		log.Panic("can not be input dir == output dir")
 	}
-	sql.MAX_VALUES_COUNT = MaxValuesCount
+	sql.BATCH_SIZE = MaxValuesCount
+	sql.SET_FOREIGN_KEY_CHECKS_OFF = SetForeignKeyChecksOff
 
 	listDir(InputDir, OutputDir, FileExt)
 }
@@ -77,7 +80,7 @@ func listDir(inputDir, outputDir, fileExt string) {
 	}
 
 	//获取文件或目录相关信息
-	fileInfoList, err := ioutil.ReadDir(inputDir)
+	fileInfoList, err := os.ReadDir(inputDir)
 	if err != nil {
 		log.Fatal(err)
 	}

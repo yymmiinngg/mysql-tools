@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 )
 
+var SET_FOREIGN_KEY_CHECKS_OFF = false
+
 func ChgSqlFile(inputFile, outputFile string) {
-	fmt.Println("    ", inputFile)
+	fmt.Println("    ", inputFile, "->", outputFile)
 	indexHelper := NewIndexHelper(inputFile)
 	insertHelper := NewMergeInsertHelper(inputFile)
 
@@ -26,7 +27,7 @@ func ChgSqlFile(inputFile, outputFile string) {
 		defer fi.Close()
 
 		// 打开目标文件
-		fo, err := os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModeAppend)
+		fo, err := os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
@@ -35,7 +36,22 @@ func ChgSqlFile(inputFile, outputFile string) {
 		// 读取文件
 		rd = bufio.NewReaderSize(fi, 1024*16)
 		wd = bufio.NewWriterSize(fo, 1024*16)
-		defer wd.Flush()
+		defer func() {
+			// 开启外键约束
+			if SET_FOREIGN_KEY_CHECKS_OFF {
+				wd.WriteString("\n-- Open foreign checks\n")
+				wd.WriteString("SET FOREIGN_KEY_CHECKS=1;\n")
+				wd.WriteString("-- ----------------------\n")
+			}
+			wd.Flush()
+		}()
+
+		// 临时关闭外键约束
+		if SET_FOREIGN_KEY_CHECKS_OFF {
+			wd.WriteString("-- Close foreign checks\n")
+			wd.WriteString("SET FOREIGN_KEY_CHECKS=0;\n")
+			wd.WriteString("-- ----------------------\n\n")
+		}
 
 		_, err = wd.WriteString("-- FOR SPEED SQL --\n")
 		if err != nil {
@@ -88,19 +104,37 @@ func ChgSqlFile(inputFile, outputFile string) {
 			dropFile := outputFile + ".drop-index.sql"
 			dropSql := ""
 			for _, createTable := range indexHelper.CreateTalbeList {
-				dropSql += createTable.MakeDropSQL()
+				dropSql += createTable.MakeDropIndexSQL()
 			}
-			ioutil.WriteFile(dropFile, []byte(dropSql), os.ModeAppend)
-			fmt.Println("    ", inputFile)
+			os.WriteFile(dropFile, []byte(dropSql), os.ModePerm)
+			fmt.Println("        ", dropFile)
+		}
+		{
+			dropFile := outputFile + ".drop-fk.sql"
+			dropSql := ""
+			for _, createTable := range indexHelper.CreateTalbeList {
+				dropSql += createTable.MakeDropForeignKeySQL()
+			}
+			os.WriteFile(dropFile, []byte(dropSql), os.ModePerm)
+			fmt.Println("        ", dropFile)
 		}
 		{
 			addFile := outputFile + ".add-index.sql"
 			addSql := ""
 			for _, createTable := range indexHelper.CreateTalbeList {
-				addSql += createTable.MakeAddSQL()
+				addSql += createTable.MakeAddIndexSQL()
 			}
-			ioutil.WriteFile(addFile, []byte(addSql), os.ModeAppend)
-			fmt.Println("    ", inputFile)
+			os.WriteFile(addFile, []byte(addSql), os.ModePerm)
+			fmt.Println("        ", addFile)
+		}
+		{
+			addFile := outputFile + ".add-fk.sql"
+			addSql := ""
+			for _, createTable := range indexHelper.CreateTalbeList {
+				addSql += createTable.MakeAddForeignKeySQL()
+			}
+			os.WriteFile(addFile, []byte(addSql), os.ModePerm)
+			fmt.Println("        ", addFile)
 		}
 	}
 }
