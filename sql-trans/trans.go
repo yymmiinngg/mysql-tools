@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 var SET_FOREIGN_KEY_CHECKS_OFF = false
@@ -32,11 +33,11 @@ func ChgSqlFile(inputFile, outputFile string) {
 		defer fi.Close()
 
 		// 打开目标文件
-		fo, err := os.OpenFile(ofStruct, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+		foStruct, err := os.OpenFile(ofStruct, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
-		defer fo.Close()
+		defer foStruct.Close()
 
 		// 打开目标文件
 		foInsert, err := os.OpenFile(ofInsert, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
@@ -47,30 +48,34 @@ func ChgSqlFile(inputFile, outputFile string) {
 
 		// 读取文件
 		r = bufio.NewReaderSize(fi, 1024*16)
-		wStruct = bufio.NewWriterSize(fo, 1024*16)
+		wStruct = bufio.NewWriterSize(foStruct, 1024*16)
 		wInsert = bufio.NewWriterSize(foInsert, 1024*16)
+		defer wStruct.Flush()
 		defer func() {
 			// 开启外键约束
 			if SET_FOREIGN_KEY_CHECKS_OFF {
-				wInsert.WriteString("\n-- Open foreign checks\n")
-				wInsert.WriteString("SET FOREIGN_KEY_CHECKS=1;\n")
-				wInsert.WriteString("-- ----------------------\n")
+				outfile(wInsert, "\n-- Open foreign checks\n")
+				outfile(wInsert, "SET FOREIGN_KEY_CHECKS=1;\n")
+				outfile(wInsert, "-- ----------------------\n")
 			}
 			wInsert.Flush()
 		}()
 
+		outfile(wStruct, "-- FOR SPEED SQL --\n")
+		outfile(wStruct, "-- SQL-Trans args: "+strings.Join(os.Args[2:], " ")+"\n")
+		outfile(wStruct, "\n")
+
+		outfile(wInsert, "-- FOR SPEED SQL --\n")
+		outfile(wInsert, "-- SQL-Trans args: "+strings.Join(os.Args[2:], " ")+"\n")
+		outfile(wInsert, "\n")
+
 		// 临时关闭外键约束
 		if SET_FOREIGN_KEY_CHECKS_OFF {
-			wInsert.WriteString("-- Close foreign checks\n")
-			wInsert.WriteString("SET FOREIGN_KEY_CHECKS=0;\n")
-			wInsert.WriteString("-- ----------------------\n\n")
+			outfile(wInsert, "-- Close foreign checks\n")
+			outfile(wInsert, "SET FOREIGN_KEY_CHECKS=0;\n")
+			outfile(wInsert, "-- ----------------------\n\n")
 		}
 
-		_, err = wStruct.WriteString("-- FOR SPEED SQL --\n")
-		if err != nil {
-			fmt.Println("Error in write file", outputFile)
-			panic(err)
-		}
 	}
 
 	for {
@@ -88,13 +93,13 @@ func ChgSqlFile(inputFile, outputFile string) {
 			// 有合并
 			mergeInsertBean := insertHelper.TakeFullMergeInsertBean()
 			if nil != mergeInsertBean { // 合并缓存满
-				wInsert.WriteString(mergeInsertBean.MakeSQL())
+				outfile(wInsert, mergeInsertBean.MakeSQL())
 			}
 			continue
 		}
 		// insert段落结束
 		if insertHelper.HasData() {
-			wInsert.WriteString(insertHelper.MakeSQL())
+			outfile(wInsert, insertHelper.MakeSQL())
 			insertHelper.Clear()
 		}
 
@@ -106,7 +111,7 @@ func ChgSqlFile(inputFile, outputFile string) {
 			panic(err)
 		}
 		// 当前行原文输出
-		wStruct.WriteString(line)
+		outfile(wStruct, line)
 	}
 
 	// 写入删除和增加索引的文件
@@ -147,5 +152,12 @@ func ChgSqlFile(inputFile, outputFile string) {
 			os.WriteFile(addFile, []byte(addSql), os.ModePerm)
 			fmt.Println("        ", addFile)
 		}
+	}
+}
+
+func outfile(wInsert *bufio.Writer, str string) {
+	_, err := wInsert.WriteString(str)
+	if err != nil {
+		panic(err)
 	}
 }

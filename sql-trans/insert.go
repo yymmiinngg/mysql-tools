@@ -101,7 +101,7 @@ func (it *MergeInsertBean) MakeSQL() string {
 	first := true
 	for _, values := range it.VALUES {
 		if !first {
-			buffer.WriteString(",")
+			buffer.WriteString("\n  ,")
 		} else {
 			first = false
 		}

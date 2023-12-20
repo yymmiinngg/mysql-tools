@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mysqltools/sql"
+	"mysqltools/sql-trans"
 )
 
 func usage(flagset *flag.FlagSet) {
