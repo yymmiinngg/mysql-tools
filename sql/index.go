@@ -13,13 +13,14 @@ type IndexHelperBean struct {
 }
 
 type CreateTableBean struct {
-	START       string // CREATE TABLE `table_name` (
-	TABLE_NAME  string // `table_name`
-	END         string // ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-	PRIMARY_KEY *PrimaryKeyBean
-	KEY         []KeyBean
-	UNIQUE_KEY  []UniqueKeyBean
-	FOREIGN_KEY []ForeignKeyBean
+	START          string // CREATE TABLE `table_name` (
+	TABLE_NAME     string // `table_name`
+	END            string // ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	PRIMARY_KEY    *PrimaryKeyBean
+	KEY            []KeyBean
+	UNIQUE_KEY     []UniqueKeyBean
+	FOREIGN_KEY    []ForeignKeyBean
+	AUTO_INCREMENT string // AUTO_INCREMENT 对应的字段
 }
 
 type PrimaryKeyBean struct {
@@ -99,7 +100,7 @@ func (it *IndexHelperBean) InputLine(linesource string) (string, error) {
 			ON:          strings.TrimSpace(GetRight(line, "ON ")),
 		})
 	}
-	// )
+	// ) 结束符
 	if strings.Index(line, ")") == 0 {
 		if it.currentCreateTable != nil && it.currentCreateTable.END != "" {
 			return "", fmt.Errorf("%s closed double time", it.currentCreateTable.START)
@@ -108,27 +109,33 @@ func (it *IndexHelperBean) InputLine(linesource string) (string, error) {
 		it.CreateTalbeList = append(it.CreateTalbeList, *it.currentCreateTable)
 		it.currentCreateTable = nil
 	}
-	// 清除自增约束
-	if strings.Index(line, "AUTO_INCREMENT=") > 0 {
-		linesource = func() string {
-			s := GetSection(linesource, "AUTO_INCREMENT=", " ") // ENGINE=InnoDB AUTO_INCREMENT=1489841 DEFAULT CHARSET=utf8
-			if s != "" {
-				return strings.ReplaceAll(linesource, "AUTO_INCREMENT="+s+" ", "")
-			}
-			s = GetSection(linesource, "AUTO_INCREMENT=", ";") // ENGINE=InnoDB AUTO_INCREMENT=1489841;
-			if s != "" {
-				return strings.ReplaceAll(linesource, " AUTO_INCREMENT="+s+";", "")
-			}
-			s = GetRight(linesource, "AUTO_INCREMENT=") // ENGINE=InnoDB AUTO_INCREMENT=1489841
-			if s != "" {
-				return strings.ReplaceAll(linesource, " AUTO_INCREMENT="+s, "")
-			}
-			return linesource
-		}()
-	} else if strings.Index(line, " AUTO_INCREMENT") > 0 {
-		linesource = strings.ReplaceAll(linesource, " AUTO_INCREMENT", "")
-	} else if strings.Index(line, "AUTO_INCREMENT ") > 0 {
-		linesource = strings.ReplaceAll(linesource, "AUTO_INCREMENT ", "")
+	// 清除自增约束赋值
+	// if strings.Index(line, "AUTO_INCREMENT=") > 0 { // 结尾处的数值
+	// linesource = func() string {
+	// 	s := GetSection(linesource, "AUTO_INCREMENT=", " ") // ENGINE=InnoDB AUTO_INCREMENT=1489841 DEFAULT CHARSET=utf8
+	// 	if s != "" {
+	// 		return strings.ReplaceAll(linesource, "AUTO_INCREMENT="+s+" ", "")
+	// 	}
+	// 	s = GetSection(linesource, "AUTO_INCREMENT=", ";") // ENGINE=InnoDB AUTO_INCREMENT=1489841;
+	// 	if s != "" {
+	// 		return strings.ReplaceAll(linesource, " AUTO_INCREMENT="+s+";", "")
+	// 	}
+	// 	s = GetRight(linesource, "AUTO_INCREMENT=") // ENGINE=InnoDB AUTO_INCREMENT=1489841
+	// 	if s != "" {
+	// 		return strings.ReplaceAll(linesource, " AUTO_INCREMENT="+s, "")
+	// 	}
+	// 	return linesource
+	// }()
+	// } else
+	if !strings.Contains(line, "AUTO_INCREMENT=") && strings.Index(line, "AUTO_INCREMENT") > 0 { // 字段中的声明
+		autoIncrementFieldDDL := strings.TrimSpace(strings.ReplaceAll(linesource, " AUTO_INCREMENT", ""))
+		// 获得自增长字段
+		// it.currentCreateTable.AUTO_INCREMENT = strings.ReplaceAll(GetLeft(strings.TrimSpace(linesource), " "), "`", "")
+		if strings.Index(autoIncrementFieldDDL, ",") == len(autoIncrementFieldDDL)-1 {
+			autoIncrementFieldDDL = autoIncrementFieldDDL[:len(autoIncrementFieldDDL)-1]
+		}
+		it.currentCreateTable.AUTO_INCREMENT = autoIncrementFieldDDL
+		// fmt.Println(linesource, it.currentCreateTable.AUTO_INCREMENT)
 	}
 	return linesource, nil
 }
@@ -139,6 +146,10 @@ func (it *CreateTableBean) MakeDropIndexSQL() string {
 	buffer.WriteString("--\n")
 	buffer.WriteString("-- Drop KEY: " + it.TABLE_NAME + "\n")
 	buffer.WriteString("--\n")
+	if it.AUTO_INCREMENT != "" { // 移除自增长约索
+		autoIncrement := fmt.Sprintf("ALTER TABLE %s MODIFY %s;", it.TABLE_NAME, it.AUTO_INCREMENT)
+		buffer.WriteString(autoIncrement + "\n")
+	}
 	if it.PRIMARY_KEY != nil {
 		dropPrimaryKey := fmt.Sprintf("ALTER TABLE %s DROP PRIMARY KEY;", it.TABLE_NAME)
 		buffer.WriteString(dropPrimaryKey + "\n")
@@ -184,6 +195,10 @@ func (it *CreateTableBean) MakeAddIndexSQL() string {
 	for _, key := range it.UNIQUE_KEY {
 		addKey := fmt.Sprintf("ALTER TABLE %s ADD UNIQUE INDEX %s (%s);", it.TABLE_NAME, key.NAME, strings.Trim(key.FIELD, ","))
 		buffer.WriteString(addKey + "\n")
+	}
+	if it.AUTO_INCREMENT != "" { // 增加自增长约索
+		autoIncrement := fmt.Sprintf("ALTER TABLE %s MODIFY %s AUTO_INCREMENT;", it.TABLE_NAME, it.AUTO_INCREMENT)
+		buffer.WriteString(autoIncrement + "\n")
 	}
 	return buffer.String()
 }

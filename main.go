@@ -18,6 +18,14 @@ func usage(flagset *flag.FlagSet) {
 	flagset.Usage()
 	fmt.Println("CMD:")
 	fmt.Println("  sql-trans: trans sql file for import speed.")
+	fmt.Println("")
+	fmt.Println(`Import order:
+  1. struct
+  2. drop-fk
+  3. drop-index
+  4. insert
+  5. add-index
+  6. add-fk`)
 }
 
 func main() {
